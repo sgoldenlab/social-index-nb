@@ -18,8 +18,38 @@ from matplotlib.colors import ListedColormap
 import pandas as pd
 import marimo as mo
 import numpy as np
+import string
 
 from oss_app.utils import make_categorical, mo_print
+
+# helper functions
+def set_global_font(font_name="Arial"):
+    """Sets a global font for Altair charts.
+    Example to apply the custom font configuration to the chart:
+    alt.themes.register("my_custom_font_theme", set_global_font)
+    alt.themes.enable("my_custom_font_theme")
+    """
+    return {
+        "config": {
+            "title": {'font': font_name},
+            "axis": {
+                "labelFont": font_name,
+                "titleFont": font_name
+            },
+            "header": {
+                "labelFont": font_name,
+                "titleFont": font_name
+            },
+            "legend": {
+                "labelFont": font_name,
+                "titleFont": font_name
+            },
+            "view": {
+                "strokeWidth": 0 
+            }
+        }
+    }
+
 
 
 class ColorSet:
@@ -297,7 +327,7 @@ def _calculate_distribution(data_array: np.ndarray, f_axis: np.ndarray) -> tuple
 def _calculate_intersection_and_overlap(gmm_params1: dict, gmm_params2: dict, x_range: list | np.ndarray):
     """
     Calculate overlap coefficient (using the GMM-derived parameters)
-    Uses the raw norm.pdf for the coefficient, then multiplies by 100 for percentage
+    Uses the raw norm.pdf for the coefficient, then multiplies to 100 for percentage
     """
     # using estimated loc and scale from GMM parameters
     mean1_gmm_est, std1_gmm_est = gmm_params1["mean"], gmm_params1["std"]
@@ -549,346 +579,253 @@ def do_pca(data: pd.DataFrame, n_comp=3):
     return pca, principal_components, pc_evr
 
 
-def pca_biplot_old(
-    dataset_obj,
-    df_to_use=pd.DataFrame() | str | None,
-    grouping_variable="",
-    metrics_inluded: list[str] | None = None,
-    labels="",
-    pca=None,
-    n_comp=3,
-    mapping=0,
-    pcs=None,
-    colmap=None,
-    hide_text=False,
-    **scatter_kwargs,
-):
-    df: pd.DataFrame = pd.DataFrame()
-
-    # Data prep
-    assert not df_to_use.empty, "Dataset object's input DataFrame `df_to_use` cannot be empty."
-    if isinstance(df_to_use, str):
-        assert getattr(dataset_obj, df_to_use,
-                       None) is not None, f"Dataset object has no dataset `{df_to_use}`."
-        df = getattr(dataset_obj, df_to_use)
-    elif df_to_use is None:
-        assert getattr(dataset_obj, "scaled_df",
-                       None) is not None, "Default dataset `scaled_df` not found."
-        df = getattr(dataset_obj, "scaled_df")
-    else:
-        df = df_to_use
-    if not metrics_inluded:
-        # metrics_inluded = [col for col in dataset_obj.metric_variables if col != "si_score"]
-        metrics_inluded = dataset_obj.metric_variables
-    metric_labels = metrics_inluded
-
-    assert not (
-        df.empty or df is None), "Dataset object's input DataFrame `df` cannot be None."
-    # type: ignore # copy to avoid modifying original DataFrame
-    df = df[metrics_inluded].copy()
-
-    if not grouping_variable:
-        grouping_variable = dataset_obj.grouping_variable
-    group_categories = make_categorical(df[grouping_variable])
-
-    # PCA
-    pca, princomps, pc_evr = do_pca(df, n_comp)
-    if not getattr(dataset_obj, "pca", None):
-        dataset_obj.pca = do_pca(df, n_comp)
-    if pcs is None:
-        pc_range = range(n_comp)
-        pcset_to_plot = [[x, y] for x, y in zip(pc_range[0:-1], pc_range[1:])]
-    else:
-        pcset_to_plot = [pcs]
-
-    # Plotting setup
-    x_index = group_categories["codes"]
-    stylemap = {0: "v", 1: "o"}  # marker style for groups
-    sizemap = {0: 70, 1: 60}  # marker size for groups
-    conds_stylemap = [*map(stylemap.get, x_index)]
-    conds_sizemap = [*map(sizemap.get, x_index)]
-    if colmap is None:
-        match not dataset_obj.plot_colors:
-            case False:
-                colmap = dataset_obj.plot_colors[0].new_cmap
-            case _:
-                dataset_obj.map_colors(dataset_obj.si_scores)
-                colmap = dataset_obj.plot_colors[0].new_cmap
-    mapping = dataset_obj.plot_colors[0].face_colors
-
-    kwargs = dict(  # scatter parameters
-        edgecolors="face",
-        lw=0.5,
-        zorder=2,
+def make_label_table(label_mapping):
+    # mapping table layer for extra clarity
+    mapping_table = pd.DataFrame(label_mapping.items(), columns=['metric', 'abbrev'])
+    mapping_table['abbrev_x'] = [0]*len(mapping_table)
+    mapping_table['full_x'] = [0.15]*len(mapping_table)
+    mapping_table['y'] = -mapping_table.index
+    mapscale = alt.Scale(domain=[mapping_table['y'].min()-0.5, 0.5])
+    
+    table_chart = alt.Chart(mapping_table).mark_text(
+        align='right', 
+        baseline='middle', 
+        color='dimgrey',
+        fontSize=14,
+        fontWeight='bold'
+    ).encode(
+        x=alt.X('abbrev_x:Q', axis=None, scale=alt.Scale(domain=[-0.2, 2])), 
+        y=alt.Y('y:Q', axis=None, scale=mapscale),
+        text='abbrev:N',
+    ) + alt.Chart(mapping_table).mark_text(
+        align='left', 
+        baseline='middle', 
+        color='black',
+        fontSize=12
+    ).encode(
+        x=alt.X('full_x:Q', axis=None, scale=alt.Scale(domain=[-0.2, 2])), 
+        y=alt.Y('y:Q', axis=None, scale=mapscale),
+        text='metric:N'
     )
-    kwargs.update(scatter_kwargs)  # update kwargs with user parameters
-
-    # set up legend entries
-    leg_markers = [*map(stylemap.get, np.unique(group_categories["codes"]))]
-    legend_handles = [
-        Line2D([], [], marker=m, markeredgecolor="k",
-               markeredgewidth=1.5, markerfacecolor="w", linewidth=0)
-        for m in leg_markers
-    ]
-
-    # Plotting, per set of PCs given, only one if `pcs` not None
-    for pcset in pcset_to_plot:
-        coeff = np.transpose(pca.components_[pcset[0]: pcset[1] + 1])
-        xs = princomps[:, pcset[0]]
-        ys = princomps[:, pcset[1]]
-        n = coeff.shape[0]
-        scalex = 1.0 / (xs.max() - xs.min())
-        scaley = 1.0 / (ys.max() - ys.min())
-        # pdb.set_trace()
-        ncmap = colmap
-
-        plt.figure(figsize=(3, 3))
-        # plt.scatter(xs * scalex, ys * scaley, c=mapping, cmap=ncmap, s=25, edgecolors='face',
-        #             marker=conds_stylemap, size=conds_sizemap, zorder=2)
-        for _st, _si, _c, _x, _y in zip(conds_stylemap, conds_sizemap, mapping, xs, ys):
-            fs = plt.scatter(_x * scalex, _y * scaley, color=_c,
-                             cmap=ncmap, s=_si, marker=_st, **kwargs)
-        for i in range(n):
-            if not hide_text:
-                match labels:
-                    case "labeled":
-                        # plt.text(coeff[i, 0] * 1.15, coeff[i, 1] * 1.15, f'{var_labels[i]}',
-                        plt.text(
-                            coeff[i, 0] + 0.1,
-                            coeff[i, 1],
-                            f"{metric_labels[i]}",
-                            color="darkgreen",
-                            ha="left",
-                            va="center",
-                        )
-                    case "ordered":
-                        plt.text(coeff[i, 0] * 1.15, coeff[i, 1] * 1.0,
-                                 str(i), color="k", ha="center", va="center")
-                    case "":
-                        pass
-            # arc_direction_list = iter(["-", "", "-", "-", "-"])
-            plt.annotate(
-                "",
-                xy=(coeff[i, 0], coeff[i, 1]),
-                xytext=(0, 0),  # color='crimson'
-                arrowprops=dict(
-                    arrowstyle="-|>",
-                    shrinkA=0,
-                    fill=True,
-                    color="xkcd:coral",
-                    mutation_scale=12,
-                    lw=1.5,
-                    #  connectionstyle= f'arc3,rad={next(arc_direction_list)}0.1',
-                ),
-                zorder=3,
-            )
-
-        plt.grid(zorder=1)
-        plt.xlim(-1.2, 1.2)
-        plt.xticks([-1, 0, 1])
-        plt.ylim(-1.2, 1.2)
-        plt.yticks([-1, 0, 1])
-        # plt.xlim(lims:=(-.9, .9))
-        # plt.xlim(lims:=(-.92, .92))
-        # plt.xticks(ticklims:=[-0.5, 0, 0.5])
-        # plt.ylim(lims)
-        # plt.yticks(ticklims)
-        plt.xlabel(f"PC{pcset[0] + 1}")
-        plt.ylabel(f"PC{pcset[1] + 1}")
-        plt.title(
-            f"Explained variance ratio: \nPC{pcset[0] + 1}: {pc_evr[pcset[0]]:.2f},  PC{pcset[1] + 1}: {pc_evr[pcset[1]]:.2f} \nCombined:{sum(pc_evr[pcset]):.2f}"
-        )
-        if hide_text:
-            # Hide X and Y axes label marks
-            ax = plt.gca()
-            plt.xlim(lims := (-0.92, 0.92))
-            plt.ylim(lims)
-            ax.xaxis.set_tick_params(labelbottom=False)
-            ax.yaxis.set_tick_params(labelleft=False)
-            plt.xlabel(None)
-            plt.ylabel(None)
-            plt.title(None)
-            plt.grid(visible=False)
-            # single grid line instead
-            ax.axhline(0, linestyle=":", color="xkcd:gray",
-                       zorder=1)  # horizontal lines
-            ax.axvline(0, linestyle=":", color="xkcd:gray",
-                       zorder=1)  # vertical lines
-        else:
-            labels = list(group_categories["labels"])
-            handles = legend_handles
-            ax = plt.gca()
-            ax.legend(
-                handles,
-                labels,
-                loc="upper right",
-                fontsize=8,
-                bbox_to_anchor=(1.5, 1),
-                frameon=False,
-                markerscale=1.5,
-            )
+    return table_chart
 
 
-def pca_biplot(
-    df_to_use=pd.DataFrame(),
-    grouping_variable="",
+def pca_biplot_altair(
+    df_input=pd.DataFrame(),
     metrics_included: list[str] | None = None,
     labels="",
     pca_inputs: list[Union[PCA, np.ndarray, ...]] = None,
     n_comp=3,
-    mapping=0,
-    pcs=None,
+    pcs: list[int] | None = None,
     colorset: ColorSet | None = None,
     hide_text=False,
     **scatter_kwargs,
 ):
-    # data prep
+    """
+    Generates a PCA biplot using Altair.
+    """
+    
+    assert not df_input.scaled_df.empty, "Input DataFrame `df_input` cannot be empty."
+    df = df_input.scaled_df.copy()
 
-    assert not df_to_use.empty, "Input DataFrame `df_to_use` cannot be empty."
-    df = df_to_use.copy()
+    # are the metric variables explicitly defined?
     if not metrics_included:
-        metrics_included = df.select_dtypes(
-            include=[np.number]).columns.tolist()
+        metrics_included = [
+            m for m in df.columns if is_numeric_dtype(df[m]) and m != 'si_score']
     metric_labels = metrics_included
 
     # PCA
     if not pca_inputs:
-        pca, princomps, pc_evr = do_pca(df, n_comp)
+        pca, princomps, pc_evr = do_pca(df[metric_labels], n_comp)
     else:
         pca, princomps, pc_evr = pca_inputs
-    if pcs is None:  # TODO: rename pcs and pcset_to_plot
-        pc_range = range(n_comp)
-        pcset_to_plot = [[x, y] for x, y in zip(pc_range[0:-1], pc_range[1:])]
-    else:
-        pcset_to_plot = [pcs]
 
-    # Plotting setup
-    assert grouping_variable != "", "Grouping variable must be specified."
+    if pcs is None:
+        pcs = [0, 1]
+    pc_x, pc_y = pcs[0], pcs[1]
+
+    # Create a DataFrame with principal components
+    pc_df = pd.DataFrame(
+        princomps[:, [pc_x, pc_y]],
+        columns=[f'PC{pc_x+1}', f'PC{pc_y+1}'],
+        index=df.index
+    )
+    # add subject id and group assignment
+    subject_id_variable = df_input.subject_id_variable
+    grouping_variable = df_input.grouping_variable
+    pc_df[subject_id_variable] = df[subject_id_variable]
+    pc_df[grouping_variable] = df[grouping_variable]
+
+    # Color and Shape mapping
     group_categories = make_categorical(df[grouping_variable])
-    x_index = group_categories["codes"]
-    style_mapping = {0: "v", 1: "o"}  # marker style for groups
-    size_mapping = {0: 70, 1: 60}  # marker size for groups
-    conds_stylemap = [style_mapping.get(i)
-                      for i in x_index]  # TODO: rename conds_*
-    conds_sizemap = [size_mapping.get(i) for i in x_index]
     if colorset is None:
         colorset = ColorSet(
             color_name="viridis_r",
-            metric_name='si_score',  # choose a
+            metric_name='si_score',
             grouping_variable=grouping_variable,
             group_name=group_categories["labels"][0],
             data=df
         )
-    mapping = colorset.colors
-
-    kwargs = dict(  # scatter parameters
-        edgecolors="face",
-        lw=0.5,
-        zorder=2,
+    # color for each datapoint, based on 'si_score' value
+    pc_df['color'] = [row for row in colorset.hex_colors]
+    # marker style/shape based on group
+    style_mapping = {
+        label: shape for label, shape in zip(group_categories['labels'].tolist(), ['triangle-down', 'circle'])
+    }
+    pc_df['shape'] = df[grouping_variable].map(style_mapping)
+    # marker size based on group
+    size_mapping = {
+        label: size for label, size in zip(group_categories['labels'], [180,140])
+    }
+    pc_df['size'] = df[grouping_variable].map(size_mapping)
+    
+    max_abs_value = max(np.abs(pc_df.iloc[:,pc_x]).max(), np.abs(pc_df.iloc[:,pc_y]).max())
+    shared_scale = alt.Scale(domain=[-max_abs_value-0.2, max_abs_value+0.2])
+    
+    # Scatter plot of principal components
+    zero_lines = alt.Chart(  # Add dashed line for x=0
+        pd.DataFrame({'x': [0]})
+        ).mark_rule(strokeDash=[5, 5], strokeWidth=2,
+        ).encode(
+            x='x:Q',
+            color=alt.value('gray') # Optional: set a color for the line
+        ) + alt.Chart(  # Add dashed line for y=0
+            pd.DataFrame({'y': [0]})
+        ).mark_rule(strokeDash=[5, 5], strokeWidth=2
+        ).encode(
+            y='y:Q',
+            color=alt.value('gray') # Optional: set a color for the line
     )
-    kwargs.update(scatter_kwargs)  # update kwargs with user parameters
 
-    # set up legend entries
-    leg_markers = [
-        *map(style_mapping.get, np.unique(group_categories["codes"]))]
-    legend_handles = [
-        Line2D([], [], marker=m, markeredgecolor="k",
-               markeredgewidth=1.5, markerfacecolor="w", linewidth=0)
-        for m in leg_markers
-    ]
+    hover = alt.selection_point(on='pointerover', nearest=False, empty=False, resolve='intersect')
+    when_hover = alt.when(hover)
 
-    # Plotting, per set of PCs given, only one if `pcs` not None
-    for pcset in pcset_to_plot:
-        coeff = np.transpose(pca.components_[pcset[0]: pcset[1] + 1])
-        xs = princomps[:, pcset[0]]
-        ys = princomps[:, pcset[1]]
-        n = coeff.shape[0]
-        scalex = 1.0 / (xs.max() - xs.min())
-        scaley = 1.0 / (ys.max() - ys.min())
+    scatter = alt.Chart(pc_df, width=200, height=200).mark_point(
+        filled=True, opacity=1
+    ).encode(
+        x=alt.X(f'PC{pc_x+1}:Q', title=f'PC{pc_x+1}  ({pc_evr[pc_x]:.2%})', 
+                scale=shared_scale, axis=alt.Axis(orient='bottom', labels=True)),
+        y=alt.Y(f'PC{pc_y+1}:Q', title=f'PC{pc_y+1}  ({pc_evr[pc_y]:.2%})', 
+                scale=shared_scale, axis=alt.Axis(orient='left', labels=True, ticks=True)),
+        color=alt.Color('color:N', legend=None).scale(
+            domain=colorset.hex_colors, range=colorset.hex_colors),
+        stroke=when_hover.then(alt.value('black')).otherwise(alt.value('transparent')), # highlight point
+        order=when_hover.then(alt.value(1)).otherwise(alt.value(0)),  # bring hovered point to front
+        shape=alt.Shape('shape:N',
+                        legend=alt.Legend(
+                            orient='right', offset=30,
+                            title=grouping_variable, symbolType='symbol', 
+                            labelColor='black', labelFontSize=12)
+                    ).scale(domain=group_categories["labels"].tolist(), range=['triangle-down', 'circle']),
+        size=alt.Size('size:Q', scale=None),
+        tooltip=[subject_id_variable, grouping_variable]
+    ).add_params(hover)
 
-        plt.figure(figsize=(3, 3))
-        for _st, _si, _c, _x, _y in zip(conds_stylemap, conds_sizemap, mapping, xs, ys):
-            fs = plt.scatter(_x * scalex, _y * scaley, color=_c,  # cmap=ncmap,
-                             s=_si, marker=_st, **kwargs)
+    # Loadings plot
+    loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
+    loadings_df = pd.DataFrame(
+        loadings,
+        columns=[f'PC{i+1}' for i in range(n_comp)],
+        index=metric_labels
+    )
+    
+    # Arrows for loadings
+    arrows_data = []
+    for i, metric in enumerate(metric_labels):
+        arrows_data.append({
+            'metric': metric,
+            'origin': 0,
+            'x': loadings[i, pc_x],
+            'y': loadings[i, pc_y],
+            'angle': 90.0-np.round(np.arctan2(loadings[i, pc_y], loadings[i, pc_x], dtype=float) * 180.0 / np.pi, 5)
+        })
+    arrows_df = pd.DataFrame(arrows_data)
 
-        for i in range(n):
-            if not hide_text:
-                match labels:
-                    case "labeled":
-                        # plt.text(coeff[i, 0] * 1.15, coeff[i, 1] * 1.15, f'{var_labels[i]}',
-                        plt.text(
-                            coeff[i, 0] + 0.1,
-                            coeff[i, 1],
-                            f"{metric_labels[i]}",
-                            color="darkgreen",
-                            ha="left",
-                            va="center",
-                        )
-                    case "ordered":
-                        plt.text(coeff[i, 0] * 1.15, coeff[i, 1] * 1.0,
-                                 str(i), color="k", ha="center", va="center")
-                    case "":
-                        pass
+    # mapping labels to loadings
+    label_mapping = {
+        original: letter for original, letter in zip(arrows_df['metric'], string.ascii_lowercase)
+    }
+    arrows_df['abbrev'] = arrows_df['metric'].map(label_mapping)
+    
+    arrows = alt.Chart(arrows_df).mark_rule(color='indianred', opacity=1, strokeWidth=3).encode(
+        x=alt.X('origin:Q', scale=shared_scale),
+        y=alt.Y('origin:Q', scale=shared_scale),
+        x2='x:Q',
+        y2='y:Q'
+    ) + alt.Chart(arrows_df).mark_point(shape='triangle', size=150, opacity=1,
+        color='indianred', filled=True,
+    ).encode(
+        x=alt.X('x:Q', scale=shared_scale),
+        y=alt.Y('y:Q', scale=shared_scale),
+        angle=alt.Angle('angle:Q', scale=alt.Scale(domain=[-180,180], range=[-180,180])),
+        tooltip=[alt.Tooltip('metric', title='Metric name =')],
+    )
 
-            plt.annotate(
-                "",
-                xy=(coeff[i, 0], coeff[i, 1]),
-                xytext=(0, 0),  # color='crimson'
-                arrowprops=dict(
-                    arrowstyle="-|>",
-                    shrinkA=0,
-                    fill=True,
-                    color="xkcd:coral",
-                    mutation_scale=12,
-                    lw=1.5,
-                    #  connectionstyle= f'arc3,rad={next(arc_direction_list)}0.1',
-                ),
-                zorder=3,
-            )
+    arrow_labels = alt.Chart(arrows_df).mark_text(
+        align='left',
+        dx=-12,
+        dy=-8,
+        color='black',
+        size=24,
+    ).encode(
+        x=alt.X('x_jittered:Q', scale=shared_scale),
+        y=alt.Y('y_jittered:Q', scale=shared_scale),
+        text='abbrev:N',
+    ).transform_calculate(
+        # Adjust the scale to control the spread of the jitter.
+        x_jittered='datum.x + (datum.x > 0 ? 0.25+abs(0.5*datum.x) : -0.25-abs(0.5*datum.x))', # standard jitter
+        y_jittered='datum.y + (datum.y > 0.25 ? 0.25*datum.y : -0.25*datum.y)'  # biased jitter
+    )
+    
+    chart = (zero_lines + arrows + scatter + arrow_labels).properties(
+        title=alt.Title(f'PCA biplot  [ {grouping_variable=} ]', 
+                        anchor='middle', baseline='top', fontSize=14, color='black'), 
+        width=200, height=200
+    ).interactive()
 
-            plt.grid(zorder=1)
-            plt.xlim(-1.2, 1.2)
-            plt.xticks([-1, 0, 1])
-            plt.ylim(-1.2, 1.2)
-            plt.yticks([-1, 0, 1])
-            # plt.xlim(lims:=(-.9, .9))
-            # plt.xlim(lims:=(-.92, .92))
-            # plt.xticks(ticklims:=[-0.5, 0, 0.5])
-            # plt.ylim(lims)
-            # plt.yticks(ticklims)
-            plt.xlabel(f"PC{pcset[0] + 1}")
-            plt.ylabel(f"PC{pcset[1] + 1}")
-            plt.title(
-                f"Explained variance ratio: \nPC{pcset[0] + 1}: {pc_evr[pcset[0]]:.2f},  PC{pcset[1] + 1}: {pc_evr[pcset[1]]:.2f} \nCombined:{sum(pc_evr[pcset]):.2f}"
-            )
+    mapping_chart = make_label_table(label_mapping).properties(
+        title=alt.Title('Labels', anchor='start', baseline='top', fontSize=14, color='black'),
+        height=25*len(label_mapping)
+    )
 
-            if hide_text:
-                # Hide X and Y axes label marks
-                ax = plt.gca()
-                plt.xlim(lims := (-0.92, 0.92))
-                plt.ylim(lims)
-                ax.xaxis.set_tick_params(labelbottom=False)
-                ax.yaxis.set_tick_params(labelleft=False)
-                plt.xlabel(None)
-                plt.ylabel(None)
-                plt.title(None)
-                plt.grid(visible=False)
-                # single grid line instead
-                ax.axhline(0, linestyle=":", color="xkcd:gray",
-                           zorder=1)  # horizontal lines
-                ax.axvline(0, linestyle=":", color="xkcd:gray",
-                           zorder=1)  # vertical lines
-            else:
-                labels = list(group_categories["labels"])
-                handles = legend_handles
-                ax = plt.gca()
-                ax.legend(
-                    handles,
-                    labels,
-                    loc="upper right",
-                    fontsize=8,
-                    bbox_to_anchor=(1.5, 1),
-                    frameon=False,
-                    markerscale=1.5,
-                )
-            return fs
+    # chart = alt.hconcat(chart, mapping_chart).properties(
+    #     width=250,  # Set width to 600 pixels
+    #     height=500  # Set height to 400 pixels
+    # )
+    
+    # general styling
+    styling=dict(
+        configure=dict(
+            background='white'),
+        configure_view=dict(
+            fill='white', stroke=None, strokeWidth=0, strokeOpacity=0)
+    )
+
+    chart = (
+        chart
+        .configure(**styling["configure"])
+        .configure_view(**styling["configure_view"])
+        .configure_axis(
+                labelColor='black', titleColor='black', titleFontSize=14,
+                tickColor='black', tickWidth=2, 
+                labelFontSize=12, labelFontWeight='bold', labelFont='arial',
+                labelFlush=False, labelPadding=5,
+                domainColor='black', domainWidth=2, grid=False  #gridColor='black'#gridDash=[2,2]
+        )).configure_axisTop(
+            domain=False
+        ).configure_axisRight(
+            domain=False
+        )
+    
+    mapping_chart = (
+        mapping_chart
+        .configure(**styling["configure"])
+        .configure_view(**styling["configure_view"])
+    )
+
+    if hide_text:
+        chart = chart.configure_axis(labels=False, title=None)
+        chart = chart.configure_title(text=None)
+        chart = chart.configure_legend(title=None, labels=False)
+
+    return chart, mapping_chart

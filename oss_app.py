@@ -16,9 +16,6 @@ def _():
     import pandas as pd
     import matplotlib.pyplot as plt
     import numpy as np
-    from oss_app import oss_func_simple as sf
-    from oss_app import utils as ut
-    from oss_app import dataset as ds
     # import pandera.pandas as pa
     from pathlib import Path
     import altair as alt
@@ -26,23 +23,18 @@ def _():
     import json
     from os import mkdir
     from datetime import datetime
+
+    return Path, alt, asyncio, datetime, json, mo, np, pd, plt
+
+
+@app.cell
+def _():
+    from oss_app import oss_func_simple as sf
+    from oss_app import utils as ut
+    from oss_app import dataset as ds
     from oss_app.utils import make_categorical
     from oss_app.plotting import show_color, show_colormap, colormap_to_hex
-    return (
-        Path,
-        alt,
-        asyncio,
-        datetime,
-        ds,
-        json,
-        make_categorical,
-        mo,
-        np,
-        pd,
-        plt,
-        show_color,
-        show_colormap,
-    )
+    return ds, make_categorical, show_color, show_colormap
 
 
 @app.cell
@@ -446,8 +438,8 @@ def _(df, loaded_params, mo, previous_params):
         subject_id_initial = [previous_params["subject_id_variable"]]
         sex_variable_initial = [previous_params["sex_variable"]]
         grouping_variable_initial = [previous_params["grouping_variable"]]
-        index_variables_initial = [previous_params["index_variables"]]
-        metrics_variables_initial = [previous_params["metric_variables"]]
+        index_variables_initial = previous_params["index_variables"]
+        metrics_variables_initial = previous_params["metric_variables"]
 
     # Create dropdowns for selecting columns, or fill in with loaded parameters
     subject_id_selector = mo.ui.multiselect(
@@ -1124,16 +1116,6 @@ def _(ds, filter_ui, var_choices):
 
 
 @app.cell
-def _(data):
-    from oss_app.plotting import do_pca, pca_biplot
-    pca_metrics = [m for m in data.metric_variables if m != 'si_score']
-    metricsdata = data.scaled_df[pca_metrics]
-    pca, principal_components, pc_evr = do_pca(metricsdata)
-
-    return
-
-
-@app.cell
 def _(data, mo):
     mo.vstack([
         mo.md("""### Preview datasets  
@@ -1153,10 +1135,17 @@ def _(mo):
     mo.md(
         r"""
     ---
-    ## <span style='color:lightcoral'> Distribution plots
-    <span style='font-family:arial'>Desc... 
+    ## <h2 style='font-family:arial; color:lightcoral'> Index score plots</h2>
+    
+    <span style='color:tomato;font-weight:bold;font-size:18px'>Population distributions</span>  
+    <span style='font-size:12'>Plots comparing normalized distributions of index scores across group samples, either a single metric comparison or all selected metrics.</span>
 
-    Click on each <span style='border:2px solid coral;padding-right: 5px'><span>:arrow_down_small:</span> plot title</span> to reveal plot. </span>
+    <span style='color:tomato;font-weight:bold;font-size:18px'>Individual distributions and correlations</span>   *- [WIP not implemented]*  
+    Scatter plots show distributions over index scores within and between groups, along with distributions over correlations between index scores and each selected metric.
+
+
+    <span style='color:tomato;font-weight:bold;font-size:18px'>PCA of index scores</span>  
+    PCA biplot showing relative contributions to principal components of selected metrics composing the index score.
     """
     )
     return
@@ -1250,6 +1239,7 @@ def _(data, get_range, mo, np, set_compare_metric, set_range):
         rangey_slider,
         save_distplot_button,
         save_distplots_button,
+        save_pca_biplot_button,
     )
 
 
@@ -1335,9 +1325,9 @@ def _(
 
     # Layout
     mo.output.append(mo.vstack([
-        mo.md("### <span style='border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small:Single metric distribution comparison"),
-        mo.md(f"""
-            Desc...  <br>
+        mo.md("### <span style='font-family:arial;border:2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small:Single metric distribution comparison"),
+        mo.md(f"""<span style='font-family:arial;font-size:16px'>
+            Compare normalized population distributions between groups for a given metric (default: index score).<br></span>
             <br>
             """).style(color="white"),
         dist_layout,
@@ -1362,7 +1352,7 @@ def _(
         with mo.redirect_stdout():
             save_plot(dist_plot, plot_filepath)
 
-    return plot_distribution, save_plot
+    return dist_plot, plot_distribution, save_plot
 
 
 @app.cell
@@ -1395,9 +1385,9 @@ def _(
 
     # Layout
     mo.output.append(mo.vstack([
-        mo.md("### <span style='border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small:Distribution comparisons for chosen metrics"),
-        mo.md(f"""
-            Desc...  <br>
+        mo.md("### <span style='font-family:arial;border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small:Distribution comparisons for chosen metrics"),
+        mo.md(f"""<span style='font-family:arial;font-size:16px'>
+            Compare normalized population distributions between groups for all selected metrics.<br></span>
             <br>
             """).style(color="white"),
         final_chart,
@@ -1429,11 +1419,10 @@ def _(mo):
 
     # Layout
     mo.output.append(mo.vstack([
-        mo.md("### <span style='border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small:<span style='color: crimson'>(Not implemented!)</span> Scatterplot metrics"),
-        mo.md(f"""
-            Distribution scatterplots of individual data points colored by overall index score. <br>
-            Can use z-scored or raw metric values.
-            <br>
+        mo.md("### <span style='font-family:arial;border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small:<span style='color: crimson'>(Not implemented yet!)</span> Scatterplot metrics"),
+        mo.md(f"""<span style='font-family:arial;font-size:16px'>
+            Distribution scatterplots of individual data points across selected metrics, each data point colored by sample index score. Can use z-scored or raw metric values. 
+            <br></span>
             <br>
             """),
         # mo.md("""**Example**<br>
@@ -1452,11 +1441,10 @@ def _(mo):
 
     # Layout
     mo.output.append(mo.vstack([
-        mo.md("### <span style='border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small:<span style='color: crimson'>(Not implemented!)</span> Correlation scatter metrics"),
-        mo.md(f"""
-            Correlation plots for each metric against the index score, also colored by index score.   <br>
-            Can use z-scored or raw metric values.
-            <br>
+        mo.md("### <span style='font-family:arial;border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small:<span style='color: crimson'>(Not implemented yet!)</span> Correlation scatter metrics"),
+        mo.md(f"""<span style='font-family:arial;font-size:16px'>
+            Correlation scatterplots with individual distributions for each selected metric against their index score, also colored by index score. Can use z-scored or raw metric values.
+            <br></span>
             <br>
             """),
         # mo.md("""**Example**<br>
@@ -1473,35 +1461,64 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _(alt, data, dist_plot, mo, save_path, save_pca_biplot_button, save_plot):
+    from oss_app.plotting import do_pca, pca_biplot_altair, set_global_font
+    alt.themes.register("arial_font", set_global_font)
+    alt.themes.enable("arial_font")
+
+    def plot_pca_biplot(df):#compare_metric: str, max_y: int = None, rangex: list = []):
+    
+        pca_metrics = [m for m in df.metric_variables if m != 'si_score']
+        pca_data = df.scaled_df
+    
+        # Generate the Altair plot using the selected UI values
+        altplot_interactive = pca_biplot_altair(
+            df,
+            metrics_included=pca_metrics,
+            labels="",
+            pca_inputs=None,
+            n_comp=3,
+            mapping=0,
+            pcs=None,
+            colorset=None,
+            hide_text=False
+        )
+        return altplot_interactive
+
+    with mo.capture_stdout() as _buffer:
+        biplot, legend = plot_pca_biplot(data)
 
     # Layout
     mo.output.append(mo.vstack([
-        mo.md("### <span style='border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small:<span style='color: crimson'>(Not implemented!)</span> PCA analysis"),
-        mo.md(f"""
+        mo.md("### <span style='font-family:arial;border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small: PCA analysis"),
+        mo.md(f"""<span style='font-family:arial;font-size:16px'>
             PCA includes two plots:  
-
-            - biplot of individual data points for scaled metrics, colored by index score
-            - correlation matrix of scaled metrics to each principal component
-            <br>
-            Can be labeled (with metrics' names), ordered (index number of metric column) or None (no text).
-            <br>
-            <br>
-            """),
-        # mo.md("**Examples**<br>"),
-        # mo.md("""
-        # Labeled  
-        # <img src="public/pca_labeled.png" width="300" />  
-        # Ordered  
-        # <img src="public/pca_ordered.png" width="300" />
-        # None  
-        # <img src="public/pca_none.png" width="300" />  
-        # <br>
-        # Matrix  
-        # <img src="public/pca_matrix.png" width="300" />
-        # """),
-        # save_scatter_button.right()
+            - biplot of individual data points for scaled metrics, colored by index score  
+            - correlation matrix of scaled metrics to each principal component - WIP
+            <br></span>
+            """).style(color="white"),
+        mo.hstack([biplot, legend], justify='start'),
+        # dist_layout,
+        save_pca_biplot_button.right(),
     ]))
+
+    _console_logs = ['<br>'+line for line in _buffer.getvalue().split('\n')]
+    _formatted_logs = [
+        f"<span style='display:block;font-size:13px;line-height:8px;font-family:monospace'>{log}" for log in _console_logs]
+
+    mo.output.append(
+        mo.md(
+            f"""/// details | Console outputs
+                type: info 
+            {mo.as_html(mo.md('<br>'.join(_formatted_logs)))}
+            ///"""
+        ))
+
+    if save_pca_biplot_button.value:
+        _plot_filepath = save_path / \
+            f'pca_biplot.png'  # TODO: change label
+        with mo.redirect_stdout():
+            save_plot(dist_plot, _plot_filepath)
     return
 
 
