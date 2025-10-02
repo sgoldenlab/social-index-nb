@@ -61,7 +61,7 @@ Once the environment is set up and activated, run the Marimo notebook with the f
 
 -   [ ] Index distribution scatter plots
 -   [ ] Index-metric correlation plots
--   [ ] PCA biplots
+-   [x] PCA biplots
 -   [ ] Component correlation matrix
 
 ## License
