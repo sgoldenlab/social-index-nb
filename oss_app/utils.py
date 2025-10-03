@@ -1,22 +1,13 @@
 import marimo as mo
 import pandas as pd
-import altair as alt
 import numpy as np
 import json
-import matplotlib.pyplot as plt
 from pathlib import Path
 from datetime import datetime
 from typing import Union, Tuple
-from scipy.stats import norm as normf
-from sklearn import mixture
-# from oss_app.dataset import Dataset
-from scipy.stats import ks_2samp
-from sklearn import decomposition
-from matplotlib.lines import Line2D
+
 
 # %% Helper functions for oss_app.py notebook
-
-
 def mo_print(*args, **kwargs):
     """
     Prints messages to a marimo output cell using mo.redirect_stdout().
@@ -65,9 +56,43 @@ def save_parameters(
     return file_out_path
 
 
+def test_minmax(plotdata: np.ndarray, curr_mm=(0, 0), debug=False):
+    curr_min, curr_max = curr_mm
+    vmin, vmax = (min(plotdata), max(plotdata))
+    mintest = 1 if vmin < curr_min else 0
+    maxtest = 1 if vmax > curr_max else 0
+    match (mintest, maxtest):
+        case (1, 0):
+            curr_min = vmin
+        case (0, 1):
+            curr_max = vmax
+        case (1, 1):
+            curr_min = vmin
+            curr_max = vmax
+        case _:
+            curr_min, curr_max = vmin, vmax
+    if debug:
+        print(mintest, maxtest)
+    return curr_min, curr_max
+
+
+def round_to_nearest(base, *nums, round_up=True):
+    """round num to nearest `base`,
+    round up will round number away to higher magnitude, away from 0.
+    """
+    for num in nums:
+        if (num < 0 and round_up) or (num > 0 and not round_up):
+            # rounds negative number up, positive down
+            bias = base//2
+        else:
+            # rounds negative number down, positive up
+            bias = base
+        roundt = num % base
+        n = num + bias if roundt != 0 else num
+        yield n - (n % base)
+
+
 # %% Data processing helper functions
-
-
 def fix_name(*names: str) -> Union[str, Tuple[str, ...]]:
     """
     Fixes one or more names by removing leading/trailing whitespace and converting to lowercase.

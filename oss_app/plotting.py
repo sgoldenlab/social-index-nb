@@ -1,17 +1,14 @@
 from io import BytesIO
-from base64 import b64encode
-from click import group
+import random
 import matplotlib.pyplot as plt
 import altair as alt
-from typing import Union, Tuple, Any
+from typing import Union, Tuple
 from scipy.stats import norm as normf
 from sklearn import mixture
-from oss_app.dataset import Dataset
 from scipy.stats import ks_2samp
 from sklearn import decomposition
 from sklearn.decomposition import PCA
 from pandas.api.types import is_numeric_dtype
-from matplotlib.lines import Line2D
 from matplotlib.pyplot import cm
 from matplotlib import colors
 from matplotlib.colors import ListedColormap
@@ -20,7 +17,9 @@ import marimo as mo
 import numpy as np
 import string
 
-from oss_app.utils import make_categorical, mo_print
+
+from oss_app.utils import make_categorical, mo_print, test_minmax, round_to_nearest
+
 
 # helper functions
 def set_global_font(font_name="Arial"):
@@ -49,7 +48,6 @@ def set_global_font(font_name="Arial"):
             }
         }
     }
-
 
 
 class ColorSet:
@@ -543,9 +541,8 @@ def compare_dists_altair(
 
     return chart
 
+
 # PCA
-
-
 def do_pca(data: pd.DataFrame, n_comp=3):
     """Performs Principal Component Analysis (PCA) on the provided dataset.
 
@@ -608,6 +605,158 @@ def make_label_table(label_mapping):
         text='metric:N'
     )
     return table_chart
+
+
+def si_scatter_plots(
+    # groupvar='', id_var='Animal', incl_vars='all', plot_setts={},
+    #                 fc_cols=[], share_y=True, fsize=(4, 1.25), axvals=False, hide_text=False,
+    #                 scaled=False, legends=True
+    df_input: pd.DataFrame = pd.DataFrame(),
+    metrics_included: list[str] | None = None,
+    scaled=False,
+    share_y=False,
+    colorset: ColorSet | None = None,
+    hide_text=False,
+    **scatter_kwargs
+    ):
+
+    assert not df_input.scaled_df.empty, "Input DataFrame `df_input` cannot be empty."
+    df = df_input.scaled_df.copy()
+
+    # are the metric variables explicitly defined?
+    if not metrics_included:
+        metrics_included = [
+            m for m in df.columns if is_numeric_dtype(df[m]) and m != 'si_score']
+    metric_labels = metrics_included
+
+    # add subject id and group assignment
+    subject_id_variable = df_input.subject_id_variable
+    grouping_variable = df_input.grouping_variable
+
+    # Color and Shape mapping
+    group_categories = make_categorical(df[grouping_variable])
+    if colorset is None:
+        colorset = ColorSet(
+            color_name="viridis_r",
+            metric_name='si_score',
+            grouping_variable=grouping_variable,
+            group_name=group_categories["labels"][0],
+            data=df
+        )
+    fc_cols = [row for row in colorset.hex_colors]
+    style_mapping = {
+        label: shape for label, shape in zip(group_categories['labels'].tolist(), ['triangle-down', 'circle'])
+    }
+    size_mapping = {
+        label: size for label, size in zip(group_categories['labels'], [180,140])
+    }
+
+    # plotting
+    random.seed(123)  # for consistent output
+    x_index = group_categories['codes']
+    plot_settings =  scatter_kwargs.get('plot_settings', None)
+    if scaled:  # auto-adjust axes if scaled data, which should be in shared y-ranges
+        plot_settings = {}
+
+    if plot_settings is None or plot_settings == {}:
+        current_minmax = (0, 0)
+        if share_y:
+            for v in metrics_included:
+                current_minmax = test_minmax(df_input[v].values, current_minmax, debug=False)
+            for v in metrics_included:
+                plot_settings.update({
+                    v: dict(values=df_input[v].values, title=v, ylims=current_minmax),
+                    'shared_ylims': current_minmax,
+                })
+        else:
+            for v in metrics_included:
+                plot_settings.update({
+                    v: dict(values=df_input[v].values, title=v, ylims=(min(df_input[v].values), max(df_input[v].values)))
+                })
+
+    # Prepare data for Altair
+    df_long = df.copy()
+    df_long[subject_id_variable] = df_input[subject_id_variable]
+    df_long[grouping_variable] = df_input[grouping_variable]
+    df_long['color'] = fc_cols
+    df_long['shape'] = df_long[grouping_variable].map(style_mapping)
+    df_long['size'] = df_long[grouping_variable].map(size_mapping)
+
+    # Melt the DataFrame to long format for faceting
+    df_melted = df_long.melt(
+        id_vars=[subject_id_variable, grouping_variable, 'color', 'shape', 'size'],
+        value_vars=metrics_included,
+        var_name='metric',
+        value_name='value'
+    )
+
+    # Base chart for a single facet
+    chart = alt.Chart(df_melted).mark_point(
+        filled=True,
+        opacity=1,
+        stroke='black',
+        strokeWidth=0.5
+    ).encode(
+        x=alt.X(
+            f'{grouping_variable}:N',
+            axis=alt.Axis(
+                title=None,
+                labels=not hide_text,
+                ticks=False,
+                domain=False,
+                grid=False,
+                labelAngle=0
+            ),
+            # Add jitter to create a strip plot effect
+            # The jitter amount might need adjustment
+            jitter=0.4
+        ),
+        y=alt.Y(
+            'value:Q',
+            axis=alt.Axis(
+                title=None,
+                labels=not hide_text,
+                grid=False,
+                # Set number of ticks to 2 to mimic original plot
+                tickCount=2,
+                format='.1f' if scaled else '.0f'
+            ),
+            # Scale will be resolved across facets
+            scale=alt.Scale(zero=False)
+        ),
+        color=alt.Color('color:N', scale=None),  # Use pre-mapped colors
+        shape=alt.Shape('shape:N', scale=None),  # Use pre-mapped shapes
+        size=alt.Size('size:Q', scale=None),   # Use pre-mapped sizes
+        tooltip=[subject_id_variable, grouping_variable, 'metric', 'value']
+    )
+
+    # Facet the chart by metric
+    facet_chart = chart.facet(
+        column=alt.Column(
+            'metric:N',
+            header=alt.Header(
+                title=None,
+                labelOrient='top',
+                labelAlign='left',
+                labelAngle=-45,
+                labelPadding=5,
+                labelFontSize=9 if not hide_text else 0,
+                labelFontWeight='bold' if not hide_text else 'normal'
+            )
+        )
+    ).resolve_scale(
+        y='shared' if share_y else 'independent'
+    )
+
+    # Apply final configurations
+    final_chart = facet_chart.configure_view(
+        stroke=None  # Remove border around each plot
+    ).configure_axis(
+        labelFont='arial',
+        titleFont='arial'
+    )
+
+    return final_chart
 
 
 def pca_biplot_altair(
@@ -776,7 +925,7 @@ def pca_biplot_altair(
         x_jittered='datum.x + (datum.x > 0 ? 0.25+abs(0.5*datum.x) : -0.25-abs(0.5*datum.x))', # standard jitter
         y_jittered='datum.y + (datum.y > 0.25 ? 0.25*datum.y : -0.25*datum.y)'  # biased jitter
     )
-    
+
     chart = (zero_lines + arrows + scatter + arrow_labels).properties(
         title=alt.Title(f'PCA biplot  [ {grouping_variable=} ]', 
                         anchor='middle', baseline='top', fontSize=14, color='black'), 
@@ -792,9 +941,8 @@ def pca_biplot_altair(
     #     width=250,  # Set width to 600 pixels
     #     height=500  # Set height to 400 pixels
     # )
-    
     # general styling
-    styling=dict(
+    styling = dict(
         configure=dict(
             background='white'),
         configure_view=dict(
@@ -816,7 +964,7 @@ def pca_biplot_altair(
         ).configure_axisRight(
             domain=False
         )
-    
+
     mapping_chart = (
         mapping_chart
         .configure(**styling["configure"])
