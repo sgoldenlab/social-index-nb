@@ -216,10 +216,10 @@ def _(Path, datetime, file_not_chosen, filename, filepath_parent, mo):
     # output folder will be in input file folder
     # today_dt = datetime.today().strftime('%y%m%d_%Hh%Mm')  # date and time stamp
     today_dt = datetime.today().strftime('%y%m%d')  # date stamp only
-    save_path = filepath_parent / f'{Path(filename).stem}_{today_dt}'
+    save_path_prev = filepath_parent / f'{Path(filename).stem}_{today_dt}'
 
     # check for previously saved params file
-    save_folder_found = save_path.exists()
+    save_folder_found = save_path_prev.exists()
     params_found = (params_file := list(
         filepath_parent.rglob('params*.json'))) != []
     load_btn = mo.ui.run_button(
@@ -233,19 +233,26 @@ def _(Path, datetime, file_not_chosen, filename, filepath_parent, mo):
         params_file,
         params_found,
         save_folder_found,
-        save_path,
+        save_path_prev,
         set_loaded_params,
         today_dt,
     )
 
 
 @app.cell
-def _(mo, overwrite, params_file, params_found, save_folder_found, save_path):
+def _(
+    mo,
+    overwrite,
+    params_file,
+    params_found,
+    save_folder_found,
+    save_path_prev,
+):
     with mo.redirect_stdout():
         if not overwrite:
             if save_folder_found and not params_found:
                 print(
-                    f'Found save folder at:<br> {save_path}, <br>but no `params` json file found.')
+                    f'Found save folder at:<br> {save_path_prev}, <br>but no `params` json file found.')
             elif params_found:
                 # params_file = params_file[0]
                 param_file_dict = {f.name: f for f in params_file}
@@ -346,6 +353,7 @@ def _(
         param_file = param_file_dict[select_params.value]
         with open(param_file, 'r') as _file:
             previous_params = json.load(_file)
+        save_path = param_file.parent
         set_loaded_params(True)
 
     if not loaded_params():
@@ -356,7 +364,7 @@ def _(
         'Parameters loaded': display_selections_markdown(previous_params, 'Loaded Parameters'),
         'JSON file': mo.json(previous_params, label='Loaded PARAMS.JSON')
     })
-    return (previous_params,)
+    return previous_params, save_path
 
 
 @app.cell
@@ -997,17 +1005,18 @@ def _(color_choices, group1, group2, mo, show_color, show_colormap):
         mo.vstack([
             mo.md("###<span style='font-family:arial'>Color choices"),
             mo.hstack([
+                mo.md(f"<span style='font-family:arial'>color map</span>"),
+                show_colormap(group1_colors['g1_cmap']),
+            ], justify='start', align='center'),
+        
+            mo.hstack([
                 mo.md(f"<span style='font-family:arial'>{group1}</span>"),
-                show_colormap(group1_colors['g1_cmap']
-                              ) if group1_colors else mo.md(""),
                 show_color(group1_colors['g1_solid']
                            ) if group1_colors else mo.md(""),
             ], justify='start', align='center'),
-
+        
             mo.hstack([
                 mo.md(f"<span style='font-family:arial'>{group2}</span>"),
-                show_colormap(group2_colors['g2_cmap']
-                              ) if group2_colors else mo.md(""),
                 show_color(group2_colors['g2_solid']
                            ) if group2_colors else mo.md(""),
             ], justify='start', align='center')
@@ -1136,7 +1145,7 @@ def _(mo):
         r"""
     ---
     ## <h2 style='font-family:arial; color:lightcoral'> Index score plots</h2>
-    
+
     <span style='color:tomato;font-weight:bold;font-size:18px'>Population distributions</span>  
     <span style='font-size:12'>Plots comparing normalized distributions of index scores across group samples, either a single metric comparison or all selected metrics.</span>
 
@@ -1240,6 +1249,7 @@ def _(data, get_range, mo, np, set_compare_metric, set_range):
         save_distplot_button,
         save_distplots_button,
         save_pca_biplot_button,
+        save_scatter_button,
     )
 
 
@@ -1419,20 +1429,55 @@ def _(mo):
 
     # Layout
     mo.output.append(mo.vstack([
-        mo.md("### <span style='font-family:arial;border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small:<span style='color: crimson'>(Not implemented yet!)</span> Scatterplot metrics"),
+        mo.md("### <span style='font-family:arial;border: 2px solid coral;padding:4px 5px;display:inline-block'>:arrow_down_small: Scatterplot metrics"),
         mo.md(f"""<span style='font-family:arial;font-size:16px'>
             Distribution scatterplots of individual data points across selected metrics, each data point colored by sample index score. Can use z-scored or raw metric values. 
             <br></span>
             <br>
             """),
-        # mo.md("""**Example**<br>
-        # z-scored values    
-        # <img src="public/si_scatters_zscore.png" width="500" />
-        # raw values  
-        # <img src="public/si_scatters_raw.png" width="500" />
-        # """),
-        # save_scatter_button.right()
     ]))
+    return
+
+
+@app.cell
+def _(data, mo, save_scatter_button):
+    from oss_app.plotting import si_scatter_plots, plot_colorbar
+
+    def plot_si_scatter_plots(df, scaled: bool=True):#compare_metric: str, max_y: int = None, rangex: list = []):
+
+        # Generate the Altair plot using the selected UI values
+        altplot_interactive = si_scatter_plots(
+            df_input=df,
+            metrics_included=None,
+            scaled=scaled,
+            share_y=False,
+            colorset=None,
+            hide_text=False,
+            labelColor='black'
+            # **scatter_kwargs
+        )
+        return altplot_interactive
+
+    with mo.capture_stdout() as _buffer:
+        scatter_plot = plot_si_scatter_plots(data, scaled=True)
+        _colorbar = plot_colorbar(data)
+
+    scatter_layout = mo.vstack([
+        mo.hstack([
+                scatter_plot, _colorbar
+            ], justify='start', align='start',  gap=1).center(),
+        save_scatter_button.right()
+    ])
+    mo.output.append(scatter_layout)
+    return (scatter_plot,)
+
+
+@app.cell
+def _(mo, save_path, save_plot, save_scatter_button, scatter_plot):
+    if save_scatter_button.value:
+        _plot_filepath = save_path / 'scatter_plots.png'
+        with mo.redirect_stdout():
+            save_plot(scatter_plot, _plot_filepath)
     return
 
 
@@ -1467,10 +1512,10 @@ def _(alt, data, dist_plot, mo, save_path, save_pca_biplot_button, save_plot):
     alt.themes.enable("arial_font")
 
     def plot_pca_biplot(df):#compare_metric: str, max_y: int = None, rangex: list = []):
-    
+
         pca_metrics = [m for m in df.metric_variables if m != 'si_score']
         pca_data = df.scaled_df
-    
+
         # Generate the Altair plot using the selected UI values
         altplot_interactive = pca_biplot_altair(
             df,
