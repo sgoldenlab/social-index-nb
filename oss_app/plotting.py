@@ -18,7 +18,9 @@ import numpy as np
 import string
 
 
-from oss_app.utils import make_categorical, mo_print, test_minmax, round_to_nearest
+from oss_app.utils import (
+    make_categorical, mo_print, get_minmax, test_minmax, round_to_nearest
+)
 
 
 # helper functions
@@ -608,20 +610,23 @@ def make_label_table(label_mapping):
 
 
 def si_scatter_plots(
-    # groupvar='', id_var='Animal', incl_vars='all', plot_setts={},
-    #                 fc_cols=[], share_y=True, fsize=(4, 1.25), axvals=False, hide_text=False,
-    #                 scaled=False, legends=True
     df_input: pd.DataFrame = pd.DataFrame(),
     metrics_included: list[str] | None = None,
     scaled=False,
     share_y=False,
     colorset: ColorSet | None = None,
+    label_color: str = "white",
     hide_text=False,
     **scatter_kwargs
     ):
 
     assert not df_input.scaled_df.empty, "Input DataFrame `df_input` cannot be empty."
-    df = df_input.scaled_df.copy()
+    if scaled:
+        mo_print("Using scaled data for plotting.")
+        df = df_input.scaled_df.copy()
+    else:
+        mo_print("Using raw data for plotting.")
+        df = df_input.raw_df.copy()
 
     # are the metric variables explicitly defined?
     if not metrics_included:
@@ -654,33 +659,38 @@ def si_scatter_plots(
     # plotting
     random.seed(123)  # for consistent output
     x_index = group_categories['codes']
-    plot_settings =  scatter_kwargs.get('plot_settings', None)
+    plot_settings =  scatter_kwargs.get('plot_settings', {})
     if scaled:  # auto-adjust axes if scaled data, which should be in shared y-ranges
         plot_settings = {}
 
-    if plot_settings is None or plot_settings == {}:
+    if plot_settings == {}:
+
         current_minmax = (0, 0)
         if share_y:
             for v in metrics_included:
-                current_minmax = test_minmax(df_input[v].values, current_minmax, debug=False)
+                current_minmax = test_minmax(df[v].values, current_minmax, debug=False)
             for v in metrics_included:
                 plot_settings.update({
-                    v: dict(values=df_input[v].values, title=v, ylims=current_minmax),
+                    v: dict(values=df[v].values, title=v, ylims=current_minmax),
                     'shared_ylims': current_minmax,
                 })
         else:
             for v in metrics_included:
                 plot_settings.update({
-                    v: dict(values=df_input[v].values, title=v, ylims=(min(df_input[v].values), max(df_input[v].values)))
+                    v: dict(values=df[v].values, title=v, ylims=(min(df[v].values), max(df[v].values)))
                 })
+    df['color'] = fc_cols
+    df['shape'] = df[grouping_variable].map(style_mapping)
+    df['size'] = df[grouping_variable].map(size_mapping)
 
     # Prepare data for Altair
     df_long = df.copy()
-    df_long[subject_id_variable] = df_input[subject_id_variable]
-    df_long[grouping_variable] = df_input[grouping_variable]
+    df_long[subject_id_variable] = df[subject_id_variable]
+    df_long[grouping_variable] = df[grouping_variable]
     df_long['color'] = fc_cols
     df_long['shape'] = df_long[grouping_variable].map(style_mapping)
     df_long['size'] = df_long[grouping_variable].map(size_mapping)
+
 
     # Melt the DataFrame to long format for faceting
     df_melted = df_long.melt(
@@ -689,9 +699,10 @@ def si_scatter_plots(
         var_name='metric',
         value_name='value'
     )
+    df_melted['title'] = df_melted['metric'].map(lambda m: plot_settings[m]['title'])
 
     # Base chart for a single facet
-    chart = alt.Chart(df_melted).mark_point(
+    chart = alt.Chart(df).mark_point(
         filled=True,
         opacity=1,
         stroke='black',
@@ -701,62 +712,85 @@ def si_scatter_plots(
             f'{grouping_variable}:N',
             axis=alt.Axis(
                 title=None,
-                labels=not hide_text,
+                labels=False,
                 ticks=False,
                 domain=False,
                 grid=False,
                 labelAngle=0
-            ),
-            # Add jitter to create a strip plot effect
-            # The jitter amount might need adjustment
-            jitter=0.4
-        ),
+            )),
         y=alt.Y(
-            'value:Q',
-            axis=alt.Axis(
-                title=None,
-                labels=not hide_text,
-                grid=False,
-                # Set number of ticks to 2 to mimic original plot
-                tickCount=2,
-                format='.1f' if scaled else '.0f'
+            # 'value:Q',
+            alt.repeat('column'), type='quantitative',
+            scale=alt.Scale(
+                nice=1 if not scaled else 2,  # if scaled data, don't adjust to "nice" numbers
             ),
-            # Scale will be resolved across facets
-            scale=alt.Scale(zero=False)
-        ),
-        color=alt.Color('color:N', scale=None),  # Use pre-mapped colors
-        shape=alt.Shape('shape:N', scale=None),  # Use pre-mapped shapes
+            axis=alt.Axis(
+                # title='raw values',  # use the mapped title),
+                titleFontSize=10 if not hide_text else 0,
+                labels=not hide_text,
+                labelColor=label_color,
+                grid=False,
+                tickCount=1 if not scaled else 2,
+                offset=10,
+            )),
+        color=alt.Color(
+            'color:N', scale=None,),
+        shape=alt.Shape('shape:N',
+                        scale=alt.Scale(
+                            domain=list(style_mapping.values()),
+                            range=list(style_mapping.values())
+                            )),
         size=alt.Size('size:Q', scale=None),   # Use pre-mapped sizes
-        tooltip=[subject_id_variable, grouping_variable, 'metric', 'value']
-    )
-
-    # Facet the chart by metric
-    facet_chart = chart.facet(
-        column=alt.Column(
-            'metric:N',
-            header=alt.Header(
-                title=None,
-                labelOrient='top',
-                labelAlign='left',
-                labelAngle=-45,
-                labelPadding=5,
-                labelFontSize=9 if not hide_text else 0,
-                labelFontWeight='bold' if not hide_text else 'normal'
-            )
-        )
-    ).resolve_scale(
-        y='shared' if share_y else 'independent'
-    )
+        # tooltip=[subject_id_variable, grouping_variable, 'metric', 'value']
+    ).transform_calculate(
+        # Adjust the scale to control the spread of the jitter.
+        x_jittered='datum.x + 0.25+(0.5*datum.x)'  # standard jitter
+    ).repeat(column=metrics_included)
 
     # Apply final configurations
-    final_chart = facet_chart.configure_view(
+    final_chart = chart.configure_view(  # facet_chart.configure_view(
         stroke=None  # Remove border around each plot
     ).configure_axis(
         labelFont='arial',
-        titleFont='arial'
-    )
+        titleFont='arial',
+    ).configure_axisLeft(labelColor=label_color)
 
     return final_chart
+
+
+def plot_colorbar(
+    df_input: pd.DataFrame = pd.DataFrame(),
+    colorset: ColorSet | None = None,
+    ):
+
+    assert not df_input.scaled_df.empty, "Input DataFrame `df_input` cannot be empty."
+    df = df_input.scaled_df.copy()
+    # mo_print(df)
+
+    # Color and Shape mapping
+    grouping_variable = df_input.grouping_variable
+    group_categories = make_categorical(df[grouping_variable])
+    if colorset is None:
+        colorset = ColorSet(
+            color_name="viridis_r",
+            metric_name='si_score',
+            grouping_variable=grouping_variable,
+            group_name=group_categories["labels"][0],
+            data=df
+        )
+    fc_cols = [row for row in colorset.hex_colors]
+    df['color'] = fc_cols
+
+    colorbar = alt.Chart(df).mark_rect(opacity=0).encode(
+        alt.Y('si_score:Q', axis=None),
+        color=alt.Color('si_score:Q', scale=alt.Scale(range=sorted(fc_cols,reverse=True)),
+        legend=alt.Legend(
+            title='Index Score', tickCount=3, orient='left',
+            gradientStrokeColor='black', gradientStrokeWidth=1,
+            labelOffset=5, type='gradient'
+        ))
+    ).interactive(False).properties(width=10)
+    return colorbar
 
 
 def pca_biplot_altair(
@@ -853,9 +887,9 @@ def pca_biplot_altair(
         filled=True, opacity=1
     ).encode(
         x=alt.X(f'PC{pc_x+1}:Q', title=f'PC{pc_x+1}  ({pc_evr[pc_x]:.2%})', 
-                scale=shared_scale, axis=alt.Axis(orient='bottom', labels=True)),
+                scale=shared_scale, axis=alt.Axis(orient='bottom', labels=False, ticks=True)),
         y=alt.Y(f'PC{pc_y+1}:Q', title=f'PC{pc_y+1}  ({pc_evr[pc_y]:.2%})', 
-                scale=shared_scale, axis=alt.Axis(orient='left', labels=True, ticks=True)),
+                scale=shared_scale, axis=alt.Axis(orient='left', labels=False if hide_text else True, ticks=True)),
         color=alt.Color('color:N', legend=None).scale(
             domain=colorset.hex_colors, range=colorset.hex_colors),
         stroke=when_hover.then(alt.value('black')).otherwise(alt.value('transparent')), # highlight point
@@ -922,8 +956,8 @@ def pca_biplot_altair(
         text='abbrev:N',
     ).transform_calculate(
         # Adjust the scale to control the spread of the jitter.
-        x_jittered='datum.x + (datum.x > 0 ? 0.25+abs(0.5*datum.x) : -0.25-abs(0.5*datum.x))', # standard jitter
-        y_jittered='datum.y + (datum.y > 0.25 ? 0.25*datum.y : -0.25*datum.y)'  # biased jitter
+        x_jittered='datum.x + (datum.x > 0 ? 0.25+abs(0.5*datum.x) : -0.25-abs(0.5*datum.x))',
+        y_jittered='datum.y + (datum.y > 0.25 ? 0.25*datum.y : -0.25*datum.y)'
     )
 
     chart = (zero_lines + arrows + scatter + arrow_labels).properties(
