@@ -59,7 +59,7 @@ Once the environment is set up and activated, run the Marimo notebook with the f
 
 ## WIP / Planned Features
 
--   [ ] Index distribution scatter plots
+-   [x] Index distribution scatter plots
 -   [ ] Index-metric correlation plots
 -   [x] PCA biplots
 -   [ ] Component correlation matrix
