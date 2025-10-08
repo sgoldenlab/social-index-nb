@@ -56,9 +56,13 @@ def save_parameters(
     return file_out_path
 
 
+def get_minmax(plotdata: np.ndarray) -> tuple:
+    return (min(plotdata), max(plotdata))
+
+
 def test_minmax(plotdata: np.ndarray, curr_mm=(0, 0), debug=False):
     curr_min, curr_max = curr_mm
-    vmin, vmax = (min(plotdata), max(plotdata))
+    vmin, vmax = get_minmax(plotdata)
     mintest = 1 if vmin < curr_min else 0
     maxtest = 1 if vmax > curr_max else 0
     match (mintest, maxtest):
