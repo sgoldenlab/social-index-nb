@@ -804,6 +804,7 @@ def pca_biplot_altair(
     pcs: list[int] | None = None,
     colorset: ColorSet | None = None,
     hide_text=False,
+    loading_scale: str = "data_range",  # "variance", "data_range", or "correlation"
     **scatter_kwargs,
 ):
     """
@@ -906,8 +907,31 @@ def pca_biplot_altair(
         tooltip=[subject_id_variable, grouping_variable]
     ).add_params(hover)
 
-    # Loadings plot
-    loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
+    # Loadings plot - with different scaling options
+    if loading_scale == "correlation":
+        # Scale by sqrt of explained variance ratio for correlation interpretation
+        loadings = pca.components_.T * np.sqrt(pca.explained_variance_ratio_)
+    elif loading_scale == "data_range":
+        # Scale loadings to be proportional to PC score range (may have better visibility)
+        # First calculate variance-scaled loadings
+        loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
+        
+        # Get the range of PC scores for the displayed components
+        pc_scores_displayed = princomps[:, [pc_x, pc_y]]
+        pc_range = np.abs(pc_scores_displayed).max()
+        
+        # Get the range of loadings for the displayed components
+        loadings_displayed = loadings[:, [pc_x, pc_y]]
+        loading_range = np.abs(loadings_displayed).max()
+        
+        # Scale loadings to be 80% of PC range (adjustable)
+        if loading_range > 0:
+            scale_factor = (pc_range * 0.8) / loading_range
+            loadings = loadings * scale_factor
+    else:  # "variance" - standard variance scaling
+        # Variance scaling: loadings represent variance contributions
+        loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
+    
     loadings_df = pd.DataFrame(
         loadings,
         columns=[f'PC{i+1}' for i in range(n_comp)],
@@ -952,6 +976,7 @@ def pca_biplot_altair(
         dy=-8,
         color='black',
         size=24,
+        clip=False  # Add this to prevent clipping
     ).encode(
         x=alt.X('x_jittered:Q', scale=shared_scale),
         y=alt.Y('y_jittered:Q', scale=shared_scale),
@@ -962,7 +987,7 @@ def pca_biplot_altair(
         y_jittered='datum.y + (datum.y > 0.25 ? 0.25*datum.y : -0.25*datum.y)'
     )
 
-    chart = (zero_lines + arrows + scatter + arrow_labels).properties(
+    chart = (zero_lines + scatter + arrows + arrow_labels).properties(
         title=alt.Title(f'PCA biplot  [ {grouping_variable=} ]', 
                         anchor='middle', baseline='top', fontSize=14, color='black'), 
         width=200, height=200

@@ -1596,12 +1596,23 @@ def _(mo):
 
 
 @app.cell
-def _(alt, data, dist_plot, mo, save_path, save_pca_biplot_button, save_plot):
+def _(mo):
+    pca_scaling_selector = mo.ui.dropdown(
+        options=['variance', 'data_range', 'correlation'],
+        value='data_range',
+        label="Select scaling for loadings",
+        # on_change=on_metric_change  # Call custom handler
+    )
+    return (pca_scaling_selector,)
+
+
+@app.cell
+def _(alt, data, mo, pca_scaling_selector, save_pca_biplot_button):
     from oss_app.plotting import do_pca, pca_biplot_altair, set_global_font
     alt.themes.register("arial_font", set_global_font)
     alt.themes.enable("arial_font")
 
-    def plot_pca_biplot(df):#compare_metric: str, max_y: int = None, rangex: list = []):
+    def plot_pca_biplot(df, loading_scale_type):
 
         pca_metrics = [m for m in df.metric_variables if m != 'si_score']
         pca_data = df.scaled_df
@@ -1616,12 +1627,13 @@ def _(alt, data, dist_plot, mo, save_path, save_pca_biplot_button, save_plot):
             mapping=0,
             pcs=None,
             colorset=None,
-            hide_text=False
+            hide_text=False,
+            loading_scale=loading_scale_type
         )
         return altplot_interactive
 
     with mo.capture_stdout() as _buffer:
-        biplot, legend = plot_pca_biplot(data)
+        biplot, legend = plot_pca_biplot(data, loading_scale_type=pca_scaling_selector.value)
 
     # Layout
     mo.output.append(mo.vstack([
@@ -1632,8 +1644,8 @@ def _(alt, data, dist_plot, mo, save_path, save_pca_biplot_button, save_plot):
             - correlation matrix of scaled metrics to each principal component - WIP
             <br></span>
             """).style(color="white"),
+        pca_scaling_selector,
         mo.hstack([biplot, legend], justify='start'),
-        # dist_layout,
         save_pca_biplot_button.right(),
     ]))
 
