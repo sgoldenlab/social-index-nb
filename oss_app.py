@@ -1219,6 +1219,13 @@ def _(mo):
     return
 
 
+@app.function
+def save_plot(altair_plot, plot_filepath, format: str = 'png'):
+    plot_filepath.parent.mkdir(exist_ok=True)
+    altair_plot.save(plot_filepath, format=format)
+    print(f'\nSaved plot to "{plot_filepath}".')
+
+
 @app.cell
 def _(mo):
     # --- Marimo States ---
@@ -1387,9 +1394,6 @@ def _(
     with mo.capture_stdout() as _buffer:
         dist_layout, dist_plot = dist_plot_layout()
 
-    def save_plot(altair_plot, plot_filepath, format: str = 'png'):
-        altair_plot.save(plot_filepath, format=format)
-        print(f'\nSaved plot to "{plot_filepath}".')
 
     # Layout
     mo.output.append(mo.vstack([
