@@ -21,7 +21,6 @@ def _():
     import altair as alt
     import asyncio
     import json
-    from os import mkdir
     from datetime import datetime
 
     return Path, alt, asyncio, datetime, json, mo, np, pd, plt
@@ -29,11 +28,9 @@ def _():
 
 @app.cell
 def _():
-    from oss_app import oss_func_simple as sf
-    from oss_app import utils as ut
     from oss_app import dataset as ds
     from oss_app.utils import make_categorical
-    from oss_app.plotting import show_color, show_colormap, colormap_to_hex
+    from oss_app.plotting import show_color, show_colormap
     return ds, make_categorical, show_color, show_colormap
 
 
@@ -1008,13 +1005,13 @@ def _(color_choices, group1, group2, mo, show_color, show_colormap):
                 mo.md(f"<span style='font-family:arial'>color map</span>"),
                 show_colormap(group1_colors['g1_cmap']),
             ], justify='start', align='center'),
-        
+
             mo.hstack([
                 mo.md(f"<span style='font-family:arial'>{group1}</span>"),
                 show_color(group1_colors['g1_solid']
                            ) if group1_colors else mo.md(""),
             ], justify='start', align='center'),
-        
+
             mo.hstack([
                 mo.md(f"<span style='font-family:arial'>{group2}</span>"),
                 show_color(group2_colors['g2_solid']
@@ -1092,12 +1089,6 @@ def _(mo, var_choices):
     mo.stop(var_choices == {} or var_choices is None, mo.md(
         "### Confirm variables, metrics and filtering to continue..."))
 
-    return
-
-
-@app.cell
-def _(var_choices):
-    var_choices
     return
 
 
