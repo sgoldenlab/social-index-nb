@@ -1512,19 +1512,25 @@ def _(mo):
             <br>
             """),
     ]))
-    return
+
+    raw_scaled_selector = mo.ui.dropdown(
+        options=['raw', 'scaled'],
+        value='raw',
+        label="Plot raw or scaled metrics?",
+    )
+    return (raw_scaled_selector,)
 
 
 @app.cell
-def _(data, mo, save_scatter_button):
+def _(data, mo, raw_scaled_selector, save_scatter_button):
     from oss_app.plotting import si_scatter_plots, plot_colorbar
 
-    def plot_si_scatter_plots(df, scaled: bool=True):#compare_metric: str, max_y: int = None, rangex: list = []):
+    def plot_si_scatter_plots(df, metrics_list, scaled: bool=True):#compare_metric: str, max_y: int = None, rangex: list = []):
 
         # Generate the Altair plot using the selected UI values
         altplot_interactive = si_scatter_plots(
             df_input=df,
-            metrics_included=None,
+            metrics_included=metrics_list,
             scaled=scaled,
             share_y=False,
             colorset=None,
@@ -1534,11 +1540,13 @@ def _(data, mo, save_scatter_button):
         )
         return altplot_interactive
 
+    raw_scaled = {'raw': False, 'scaled': True}
     with mo.capture_stdout() as _buffer:
-        scatter_plot = plot_si_scatter_plots(data, scaled=True)
+        scatter_plot = plot_si_scatter_plots(data, data.metric_variables, scaled=raw_scaled.get(raw_scaled_selector.value, False))
         _colorbar = plot_colorbar(data)
 
     scatter_layout = mo.vstack([
+        raw_scaled_selector,
         mo.hstack([
                 scatter_plot, _colorbar
             ], justify='start', align='start',  gap=1).center(),

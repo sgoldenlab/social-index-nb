@@ -700,6 +700,7 @@ def si_scatter_plots(
         value_name='value'
     )
     df_melted['title'] = df_melted['metric'].map(lambda m: plot_settings[m]['title'])
+    df_melted['high'] = df_melted.apply(lambda row: plot_settings[row['metric']]['ylims'][1], axis=1)
 
     # Base chart for a single facet
     chart = alt.Chart(df).mark_point(
@@ -732,6 +733,7 @@ def si_scatter_plots(
                 grid=False,
                 tickCount=1 if not scaled else 2,
                 offset=10,
+                # values=alt.range(alt.value(0), alt.datum.high)
             )),
         color=alt.Color(
             'color:N', scale=None,),
