@@ -376,7 +376,6 @@ def _(
         param_file = param_file_dict[select_params.value]
         with open(param_file, 'r') as _file:
             previous_params = json.load(_file)
-        save_path = param_file.parent
         set_loaded_params(True)
 
     if not loaded_params():
@@ -387,7 +386,7 @@ def _(
         'Parameters loaded': display_selections_markdown(previous_params, 'Loaded Parameters'),
         'JSON file': mo.json(previous_params, label='Loaded PARAMS.JSON')
     })
-    return previous_params, save_path
+    return (previous_params,)
 
 
 @app.cell
@@ -399,40 +398,83 @@ def _(
     loaded_params,
     mo,
     overwrite,
-    save_path,
+    save_path_prev,
+    selected_file_path,
     today_dt,
 ):
+    if not loaded_params():
+        save_path = save_path_prev  # set to new save folder path
+    else:
+        save_path = selected_file_path.parent  # save to same output folder as loaded parameters
+
+    plots_folder = save_path / f"plots_{today_dt}"
+
     mo.stop(create_btn.value == False or loaded_params())
-    _save_path = save_path  # make local copy of variable
-    match _save_path.exists():
+
+    match save_path.exists():
         case x if x and overwrite:  # overwrite == True
             with mo.redirect_stdout():
                 print(
-                    f'Output folder exists already in:<br> {_save_path},<br>output folder will be replaced.')
+                    f'Output folder exists already in:<br> {save_path},<br>output folder will be replaced.')
         case y if y and (not overwrite):  # overwrite == False
             with mo.redirect_stdout():
                 print(
-                    f"""Output folder exists already in:<br> {_save_path}.  
+                    f"""Output folder exists already in:<br> {save_path}.  
                     A new appended output folder will be made.""")
             _i = 0
-            while _save_path.exists():  # if file already exist, append numbers
-                _save_path = filepath_parent / \
+            while save_path.exists():  # if file already exist, append numbers
+                save_path = filepath_parent / \
                     f'{Path(filename).stem}_{today_dt}_{_i}'
                 _i += 1
     # create output folder
     # parents False as csv file should be present in existing path
-    _save_path.mkdir(exist_ok=True, parents=False)
+    save_path.mkdir(exist_ok=True, parents=False)
     with mo.redirect_stdout():
-        print(f'Created output folder at:<br> {_save_path}')
+        print(f'Created output folder at:<br> {save_path}')
 
-    return
+    return plots_folder, save_path
 
 
 @app.cell
 def _(create_btn, filepath, loaded_params, mo, pd):
     mo.stop(create_btn.value == False and not loaded_params())
     df = pd.read_csv(filepath)
-    choice = mo.ui.switch(False, label="### Advanced")
+
+    # NaN detection and handling
+    rows_before = len(df)
+    nan_counts = df.isna().sum()
+    columns_with_nans = nan_counts[nan_counts > 0]
+
+    if len(columns_with_nans) > 0:
+        # Build report of columns with NaNs
+        nan_report_lines = [f"* **{col}**: {count} NaN(s)" for col, count in columns_with_nans.items()]
+        nan_report = "\n".join(nan_report_lines)
+
+        # Drop rows with any NaN values
+        df = df.dropna()
+        rows_after = len(df)
+        rows_dropped = rows_before - rows_after
+
+        # Display warning/info about NaN handling
+        if rows_dropped > 0:
+            warning_color = "coral" if rows_dropped > rows_before * 0.1 else "khaki"
+            mo.output.append(mo.md(f"""
+            /// warning | NaN values detected and removed
+            **NaN Detection Summary:**
+
+            {nan_report}
+
+            **Rows removed:** {rows_dropped} out of {rows_before} total rows ({rows_dropped/rows_before*100:.1f}%)
+
+            All rows containing NaN values have been removed from the dataset.
+            ///
+            """).style({"color": warning_color} if rows_dropped > rows_before * 0.1 else {}))
+    else:
+        mo.output.append(mo.md("""
+        /// tip | No NaN values detected
+        The dataset contains no missing values. All rows are complete.
+        ///
+        """))
 
     mo.vstack([
         mo.md('<br>'),
@@ -1281,7 +1323,6 @@ def _(
     rangex_slider,
     rangey_slider,
     save_distplot_button,
-    save_path,
 ):
     from oss_app.plotting import compare_dists_altair
 
@@ -1390,8 +1431,6 @@ def _(
     mo,
     plot_distribution,
     save_distplots_button,
-    save_path,
-    save_plot,
 ):
 
     dist_plots = []
