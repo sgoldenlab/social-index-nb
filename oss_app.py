@@ -1418,13 +1418,23 @@ def _(
             ///"""
         ))
 
+    return dist_plot, plot_distribution
+
+
+@app.cell
+def _(
+    compare_metric_selector,
+    dist_plot,
+    mo,
+    plots_folder,
+    save_distplot_button,
+):
     if save_distplot_button.value:
-        plot_filepath = save_path / \
-            f'distplot.png'  # TODO: change label
+        plot_filepath = plots_folder / \
+            f'distribution_{compare_metric_selector.value}.png'  # TODO: change label
         with mo.redirect_stdout():
             save_plot(dist_plot, plot_filepath)
-
-    return dist_plot, plot_distribution, save_plot
+    return
 
 
 @app.cell
@@ -1476,9 +1486,15 @@ def _(
             ///"""
         ))
 
+
+    return (final_chart,)
+
+
+@app.cell
+def _(final_chart, mo, plots_folder, save_distplots_button):
     if save_distplots_button.value:
-        dist_plots_filepath = save_path / \
-            'distplots.png'  # TODO: change label
+        dist_plots_filepath = plots_folder / \
+            'distributions_all_metrics.png'  # TODO: change label
         with mo.redirect_stdout():
             save_plot(final_chart, dist_plots_filepath)
     return
@@ -1533,9 +1549,15 @@ def _(data, mo, save_scatter_button):
 
 
 @app.cell
-def _(mo, save_path, save_plot, save_scatter_button, scatter_plot):
+def _(
+    mo,
+    plots_folder,
+    raw_scaled_selector,
+    save_scatter_button,
+    scatter_plot,
+):
     if save_scatter_button.value:
-        _plot_filepath = save_path / 'scatter_plots.png'
+        _plot_filepath = plots_folder / f'distributions_scatter_plots_{raw_scaled_selector.value}.png'
         with mo.redirect_stdout():
             save_plot(scatter_plot, _plot_filepath)
     return
@@ -1619,11 +1641,16 @@ def _(alt, data, dist_plot, mo, save_path, save_pca_biplot_button, save_plot):
             ///"""
         ))
 
+    return (biplot,)
+
+
+@app.cell
+def _(biplot, mo, plots_folder, save_pca_biplot_button):
     if save_pca_biplot_button.value:
-        _plot_filepath = save_path / \
+        _plot_filepath = plots_folder / \
             f'pca_biplot.png'  # TODO: change label
         with mo.redirect_stdout():
-            save_plot(dist_plot, _plot_filepath)
+            save_plot(biplot, _plot_filepath)
     return
 
 
