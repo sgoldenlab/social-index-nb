@@ -217,8 +217,14 @@ def _(Path, datetime, file_not_chosen, filename, filepath_parent, mo):
 
     # check for previously saved params file
     save_folder_found = save_path_prev.exists()
-    params_found = (params_file := list(
-        filepath_parent.rglob('params*.json'))) != []
+    # Only search for params files in folders matching the input file name pattern
+    filename_stem = Path(filename).stem
+    matching_folders = [d for d in filepath_parent.iterdir() 
+                        if d.is_dir() and d.name.startswith(f'{filename_stem}_')]
+    params_file = []
+    for folder in matching_folders:
+        params_file.extend(list(folder.glob('params*.json')))
+    params_found = len(params_file) > 0
     load_btn = mo.ui.run_button(
         label='Load params file', disabled=not params_found)  # load params button
     loaded_params, set_loaded_params = mo.state(False)
@@ -245,6 +251,10 @@ def _(
     save_folder_found,
     save_path_prev,
 ):
+    # Initialize param_file_dict and select_params
+    param_file_dict = {}
+    select_params = None
+
     with mo.redirect_stdout():
         if not overwrite:
             if save_folder_found and not params_found:
@@ -263,17 +273,33 @@ def _(
             else:
                 print(f'No previous params file found.')
                 print(f'Click button to create new output folder.')
+
     return param_file_dict, select_params
 
 
 @app.cell
-def _(create_btn, load_btn, mo, select_params):
+def _(create_btn, load_btn, mo, param_file_dict, select_params):
     # if not overwriting and previous params found; load or create new?
+    # Display selected file path underneath dropdown
+    if select_params.value and param_file_dict:
+        # Get current selection or default to first item
+        current_selection = select_params.value if select_params.value else (list(param_file_dict.keys())[0] if param_file_dict else None)
+        if current_selection and current_selection in param_file_dict:
+            selected_file_path = param_file_dict[current_selection]
+            params_ui = mo.vstack([
+                select_params.left(),
+                mo.md(f"<span style='font-size:0.85em; color:#AAAAAA; font-family:monospace'>{selected_file_path}</span>").style({'margin-top': '4px'})
+            ])
+        else:
+            params_ui = select_params.left() if select_params else mo.md("")
+    else:
+        params_ui = select_params.left() if select_params else mo.md("")
+
     mo.output.append(mo.vstack([
         create_btn,
-        mo.hstack([load_btn, select_params.left()])
+        mo.hstack([load_btn, params_ui])
     ]))
-    return
+    return (selected_file_path,)
 
 
 @app.cell
