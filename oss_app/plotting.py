@@ -609,6 +609,285 @@ def make_label_table(label_mapping):
     return table_chart
 
 
+def create_diverging_colormap(base_colormap_name: str, n_colors: int = 256, reverse: bool=False, middle_white: bool=False):
+    """
+    Create a diverging colormap by mirroring the darker/low end of a base colormap.
+    Creates: dark (negative, -1) -> medium (zero, 0) -> light (positive, +1).
+    The darker half (0 to 0.5) is mirrored to create the positive side.
+    
+    Args:
+        base_colormap_name: Name of the base matplotlib colormap
+        n_colors: Number of colors in the diverging colormap
+        reverse: Whether to reverse the base colormap before creating diverging version
+        middle_white: If True, blend to white in the middle (for correlation matrices)
+        
+    Returns:
+        List of hex color strings for the diverging colormap
+    """
+    base_cmap = cm.get_cmap(base_colormap_name)
+    if reverse:
+        base_cmap = base_cmap.reversed()
+    
+    if middle_white:
+        # Create diverging colormap with white in the middle
+        # Mirror one end of the colormap to create a symmetric diverging colormap
+        n_half = n_colors // 2
+
+        # Get colors from one half of the colormap
+        # Which half depends on whether the colormap is reversed
+        base_colors = base_cmap(np.linspace(0.15, 0.5, n_half))
+
+        # Blend toward white in the middle
+        # Create a smooth transition that mirrors around the center
+        white = np.array([1.0, 1.0, 1.0, 1.0])  # White in RGBA
+
+        # Blend base colors toward white (more white as we approach zero)
+        blended_colors = []
+        for i, color in enumerate(base_colors):
+            # Blend factor: 0 (no white) at edges, 1 (all white) at center
+            # Use a smoother curve for better blending
+            # Lower exponent (e.g., 0.5-1.0) = more white, gentler transition
+            # Higher exponent (e.g., 1.5-2.0) = less white, sharper transition
+            blend_factor = (i / (n_half - 1)) ** 2.0 if n_half > 1 else 0
+            blended = color[:3] * (1 - blend_factor) + white[:3] * blend_factor
+            # Preserve alpha channel
+            alpha = color[3] if len(color) > 3 else 1.0
+            blended_colors.append(np.append(blended, alpha))
+
+        # Create mirrored diverging colormap
+        # The colormap will be symmetric: same color -> white -> same color
+        diverging_colors = np.vstack([
+            np.array(blended_colors),  # First half: color to white (-1 to 0)
+            np.array(blended_colors[::-1])  # Second half: white to color (0 to 1), mirrored
+        ])
+    else:
+        # Original method: mirror the darker half
+        # Get colors from the darker half of the base colormap (0 to 0.5)
+        # This represents the low/zero end
+        n_half = n_colors // 2
+        dark_half = base_cmap(np.linspace(0, 0.5, n_half))
+        
+        # Create diverging colormap by mirroring:
+        # - First half: dark colors going from darkest to medium (negative correlations, -1 to 0)
+        # - Second half: same colors reversed, going from medium to lightest (positive correlations, 0 to 1)
+        # This creates: dark -> medium -> light
+        diverging_colors = np.vstack([
+            dark_half,  # Negative side: dark to medium (-1 to 0)
+            np.flipud(dark_half)  # Positive side: medium to light (0 to 1), mirrored
+        ])
+    
+    # Convert to hex
+    hex_colors = [colors.rgb2hex(c[:3]) for c in diverging_colors]
+    return hex_colors
+
+
+def pca_correlation_heatmap(
+    pca: PCA,
+    princomps: np.ndarray,
+    metric_labels: list[str],
+    label_mapping: dict = None,
+    n_comp: int = 3,
+    colorset: ColorSet = None,
+    hide_text: bool = False,
+    use_letters: bool = True,
+    table_orientation: str = "horizontal",  # "horizontal" or "vertical"
+    colorbar_orientation: str = "vertical",  # "vertical" or "horizontal"
+    colorbar_reverse: bool = False,
+    colorbar_middle_white: bool = False,  # Use white in middle for correlation matrices
+    set_size_params: tuple = None,  # (width, height) in inches
+):
+    """
+    Create a correlation heatmap showing Pearson's correlation between 
+    principal components and metrics.
+    
+    Args:
+        pca: Fitted PCA object
+        princomps: Principal component scores (n_samples, n_components)
+        metric_labels: List of metric/variable names
+        label_mapping: Dictionary mapping metric names to letter abbreviations
+        n_comp: Number of principal components
+        colorset: ColorSet object to derive colormap from
+        hide_text: Whether to hide text labels
+        use_letters: Whether to use letter abbreviations or full metric names
+        table_orientation: "horizontal" (PCs as rows) or "vertical" (PCs as columns)
+        colorbar_orientation: "vertical" or "horizontal"
+        set_size_params: Tuple (width, height) in inches for plot size
+        
+    Returns:
+        Altair chart object
+    """
+    # Calculate actual Pearson correlations between PCs and original metrics
+    # We need the original scaled data - it should be passed or we can use loadings
+    # For exact correlations, we calculate from data: corr(metric, PC) = loading * sqrt(explained_variance_ratio)
+    # This is mathematically equivalent to calculating Pearson correlation directly
+    
+    # Get loadings
+    loadings = pca.components_.T  # Shape: (n_features, n_components)
+    
+    # Create correlation matrix
+    corr_data = []
+    for i, metric in enumerate(metric_labels):
+        for pc_idx in range(n_comp):
+            # Calculate correlation: corr(metric, PC) = loading * sqrt(explained_variance_ratio)
+            # This gives the Pearson correlation coefficient
+            corr_value = loadings[i, pc_idx] * np.sqrt(pca.explained_variance_ratio_[pc_idx])
+            
+            # Determine label
+            if use_letters and label_mapping:
+                metric_label = label_mapping.get(metric, metric)
+            else:
+                metric_label = metric
+            
+            corr_data.append({
+                'PC': f'PC{pc_idx+1}',
+                'PC_num': pc_idx + 1,
+                'Metric': metric_label,
+                'Metric_full': metric,
+                'Correlation': corr_value
+            })
+    
+    corr_df = pd.DataFrame(corr_data)
+    
+    # Determine colormap
+    if colorset:
+        base_cmap_name = colorset.name
+    else:
+        base_cmap_name = "viridis"  # Default
+    
+    # Create diverging colormap
+    diverging_colors = create_diverging_colormap(
+        base_cmap_name, 
+        n_colors=256, 
+        reverse=colorbar_reverse,
+        middle_white=colorbar_middle_white
+    )
+    
+    # Determine orientation
+    if table_orientation == "horizontal":
+        x_field = 'Metric'
+        y_field = 'PC'
+        x_title = 'Metric'
+        y_title = 'Principal Component'
+    else:  # vertical
+        x_field = 'PC'
+        y_field = 'Metric'
+        x_title = 'Principal Component'
+        y_title = 'Metric'
+    
+    # Map user-friendly orientation to Altair legend positions
+    if colorbar_orientation == "vertical":
+        legend_orient = "right"  # Vertical colorbar on the right
+        gradient_length = 200
+        gradient_thickness = 20
+    else:  # horizontal
+        legend_orient = "top"  # Horizontal colorbar on top
+        gradient_length = 300
+        gradient_thickness = 15
+    
+    # Create heatmap
+    base = alt.Chart(corr_df).mark_rect(
+        stroke='black',
+        strokeWidth=2
+    ).encode(
+        x=alt.X(f'{x_field}:N', title=x_title if not hide_text else '', 
+                axis=alt.Axis(labelAngle=0 if table_orientation == "horizontal" else -45)),
+        y=alt.Y(f'{y_field}:N', title=y_title if not hide_text else '',
+                sort=alt.SortField('PC_num') if y_field == 'PC' else None),
+        color=alt.Color('Correlation:Q',
+            scale=alt.Scale(
+                domain=[-1, 1],
+                range=diverging_colors,
+                nice=False
+            ),
+            legend=alt.Legend(
+                title="Pearson's r" if not hide_text else '',
+                orient=legend_orient,
+                titleOrient=legend_orient,
+                titleFontSize=12,
+                titleColor='black',
+                labelFontSize=12,
+                labelColor='black',
+                gradientLength=gradient_length,
+                gradientThickness=gradient_thickness,
+                tickCount=3,  # Show ticks at -1, 0, 1
+                values=[-1, 0, 1],  # Explicitly set tick values
+                format='.0d',
+                columnPadding=20,
+            )
+        ),
+        tooltip=[
+            alt.Tooltip('Metric_full:N', title='Metric'),
+            alt.Tooltip('PC:N', title='Principal Component'),
+            alt.Tooltip('Correlation:Q', title="Pearson's r", format='.2f')
+        ]
+    )
+    
+    # Add text labels with correlation values
+    text = alt.Chart(corr_df).mark_text(
+        align='center',
+        baseline='middle',
+        color='black',
+        fontSize=11,
+        fontWeight='bold'
+    ).encode(
+        x=alt.X(f'{x_field}:N'),
+        y=alt.Y(f'{y_field}:N',
+                sort=alt.SortField('PC_num') if y_field == 'PC' else None),
+        text=alt.Text('Correlation:Q', format='.2f')
+    )
+    
+    # Combine heatmap and text
+    heatmap = (base + text)
+    
+    # Set size
+    if set_size_params:
+        width, height = set_size_params
+        # Convert inches to pixels (assuming ~100 DPI)
+        width_px = int(width * 100)
+        height_px = int(height * 100)
+    else:
+        # Default size based on orientation
+        if table_orientation == "horizontal":
+            width_px = 400
+            height_px = 150
+        else:
+            width_px = 200
+            height_px = 300
+    
+    heatmap = heatmap.properties(
+        width=width_px,
+        height=height_px,
+        title=alt.Title('PCA Correlation Matrix', 
+                       anchor='middle', baseline='top', 
+                       fontSize=14, color='black') if not hide_text else None
+    )
+    
+    # Apply styling
+    styling = dict(
+        configure=dict(background='white'),
+        configure_view=dict(fill='white', stroke=None, strokeWidth=0, strokeOpacity=0)
+    )
+    
+    heatmap = (
+        heatmap
+        .configure(**styling["configure"])
+        .configure_view(**styling["configure_view"])
+        .configure_axis(
+            labelColor='black', titleColor='black', titleFontSize=12,
+            tickColor='black', tickWidth=2,
+            labelFontSize=12, labelFontWeight='bold', labelFont='arial',
+            domainColor='black', domainWidth=2, grid=False
+        )
+    )
+    
+    if hide_text:
+        heatmap = heatmap.configure_axis(labels=False, title=None)
+        heatmap = heatmap.configure_title(text=None)
+        heatmap = heatmap.configure_legend(title=None, labels=False)
+    
+    return heatmap
+
+
 def si_scatter_plots(
     df_input: pd.DataFrame = pd.DataFrame(),
     metrics_included: list[str] | None = None,
