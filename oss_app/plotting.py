@@ -1084,6 +1084,13 @@ def pca_biplot_altair(
     colorset: ColorSet | None = None,
     hide_text=False,
     loading_scale: str = "data_range",  # "variance", "data_range", or "correlation"
+    show_heatmap: bool = True,  # Whether to show correlation heatmap
+    heatmap_use_letters: bool = True,  # Use letter abbreviations in heatmap
+    heatmap_orientation: str = "horizontal",  # "horizontal" or "vertical"
+    heatmap_colorbar_orientation: str = "vertical",  # "vertical" or "horizontal"
+    heatmap_colorbar_reverse: bool = False,
+    heatmap_colorbar_middle_white: bool = False,  # Use white in middle for correlation matrices
+    heatmap_size: tuple = None,  # (width, height) in inches
     **scatter_kwargs,
 ):
     """
@@ -1316,4 +1323,23 @@ def pca_biplot_altair(
         chart = chart.configure_title(text=None)
         chart = chart.configure_legend(title=None, labels=False)
 
-    return chart, mapping_chart
+    # Create correlation heatmap if requested
+    heatmap_chart = None
+    if show_heatmap:
+        heatmap_chart = pca_correlation_heatmap(
+            pca=pca,
+            princomps=princomps,
+            metric_labels=metric_labels,
+            label_mapping=label_mapping,
+            n_comp=n_comp,
+            colorset=colorset,
+            hide_text=hide_text,
+            use_letters=heatmap_use_letters,
+            table_orientation=heatmap_orientation,
+            colorbar_orientation=heatmap_colorbar_orientation,
+            colorbar_reverse=heatmap_colorbar_reverse,
+            colorbar_middle_white=heatmap_colorbar_middle_white,
+            set_size_params=heatmap_size
+        )
+
+    return chart, mapping_chart, heatmap_chart
