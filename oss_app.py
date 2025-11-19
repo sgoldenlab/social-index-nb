@@ -1603,16 +1603,28 @@ def _(mo):
         label="Select scaling for loadings",
         # on_change=on_metric_change  # Call custom handler
     )
-    return (pca_scaling_selector,)
+    
+    # Heatmap colorbar options
+    heatmap_colorbar_reverse = mo.ui.switch(
+        value=False,
+        label="Reverse colorbar"
+    )
+    
+    heatmap_colorbar_middle_white = mo.ui.switch(
+        value=False,
+        label="Middle white (blend to white at zero)"
+    )
+    
+    return (pca_scaling_selector, heatmap_colorbar_reverse, heatmap_colorbar_middle_white)
 
 
 @app.cell
-def _(alt, data, mo, pca_scaling_selector, save_pca_biplot_button):
+def _(alt, data, mo, pca_scaling_selector, heatmap_colorbar_reverse, heatmap_colorbar_middle_white, save_pca_biplot_button):
     from oss_app.plotting import do_pca, pca_biplot_altair, set_global_font
     alt.themes.register("arial_font", set_global_font)
     alt.themes.enable("arial_font")
 
-    def plot_pca_biplot(df, loading_scale_type):
+    def plot_pca_biplot(df, loading_scale_type, reverse_colorbar: bool, middle_white: bool):
 
         pca_metrics = [m for m in df.metric_variables if m != 'si_score']
         pca_data = df.scaled_df
@@ -1628,12 +1640,25 @@ def _(alt, data, mo, pca_scaling_selector, save_pca_biplot_button):
             pcs=None,
             colorset=None,
             hide_text=False,
-            loading_scale=loading_scale_type
+            loading_scale=loading_scale_type,
+            show_heatmap=True,
+            heatmap_use_letters=True,  # or variable names
+            heatmap_orientation="horizontal",
+            heatmap_colorbar_orientation="vertical",
+            heatmap_colorbar_reverse=reverse_colorbar,
+            heatmap_colorbar_middle_white=middle_white,
+            # heatmap_size=()
+        
         )
         return altplot_interactive
 
     with mo.capture_stdout() as _buffer:
-        biplot, legend = plot_pca_biplot(data, loading_scale_type=pca_scaling_selector.value)
+        biplot, legend, heatmap = plot_pca_biplot(
+            data, 
+            loading_scale_type=pca_scaling_selector.value, 
+            reverse_colorbar=heatmap_colorbar_reverse.value,
+            middle_white=heatmap_colorbar_middle_white.value
+        )
 
     # Layout
     mo.output.append(mo.vstack([
@@ -1641,11 +1666,16 @@ def _(alt, data, mo, pca_scaling_selector, save_pca_biplot_button):
         mo.md(f"""<span style='font-family:arial;font-size:16px'>
             PCA includes two plots:  
             - biplot of individual data points for scaled metrics, colored by index score  
-            - correlation matrix of scaled metrics to each principal component - WIP
+            - correlation matrix of scaled metrics to each principal component
             <br></span>
             """).style(color="white"),
         pca_scaling_selector,
+        mo.hstack([
+            heatmap_colorbar_reverse,
+            heatmap_colorbar_middle_white
+        ], justify='start', gap=2),
         mo.hstack([biplot, legend], justify='start'),
+        heatmap,
         save_pca_biplot_button.right(),
     ]))
 
